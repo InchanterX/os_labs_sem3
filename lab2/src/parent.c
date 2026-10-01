@@ -4,8 +4,12 @@
 #include <sys/types.h>
 #include <sys/wait.h>
 
+#include "writer.h"
+
+#define ERR_EXEC_FAILED 127
+
 char *dynamic_input_reading(FILE *std_in_stream, size_t *out_length) {
-    if (!std_in_stream || !out_len) return NULL;
+    if (!std_in_stream || !out_length) return NULL;
     size_t size = 128;
     size_t length = 0;
     char *buffer = malloc(size);
@@ -30,6 +34,51 @@ char *dynamic_input_reading(FILE *std_in_stream, size_t *out_length) {
     return buffer;
 }
 
+int wait_for_child_status(pid_t pid, const char *child_name) {
+    int status;
+    if (waitpid(pid, &status, 0) == -1) {
+        perror("Waitpid failed");
+        return 1;
+    }
+
+    if (WIFEXITED(status)) {
+        int exit_code = WEXITSTATUS(status);
+
+        if (exit_code == ERR_EXEC_FAILED) {
+            fprintf(stderr, "Child (%s) was unable to execute exec.\n", child_name);
+            return 1;
+        } else if (exit_code != 0) {
+            fprintf(stderr, "Child (%s) started but finished with an error.\n", child_name);
+            return 1;
+        }
+    } else if (WIFSIGNALED(status)) {
+        fprintf(stderr, "Child (%s) process was killed with a signal %d.\n", child_name, WTERMSIG(status));
+        return 1;
+    }
+    return 0;
+}
+
+void print_from_pipe(int pipe_fd, size_t block_size) {
+    char *buffer = malloc(block_size);
+    if (!buffer) {
+        perror("Memory allocation failed");
+        return;
+    }
+
+    ssize_t bytes_read;
+    while ((bytes_read = read(pipe_fd, buffer, block_size)) > 0) {
+        fwrite(buffer, 1, bytes_read, stdout);
+    }
+
+    if (bytes_read == -1) {
+        perror("Read from pipe failed");
+    } else {
+        fprintf(stdout, "\n");
+    }
+    free(buffer);
+}
+
+
 int main(void)
 {
     // Pipes initialization
@@ -49,7 +98,6 @@ int main(void)
 
     pid_t pid1, pid2;
     pid1 = fork();
-    const char lower_name[6] = "lower";
     if (pid1 == -1) {
         perror("Fork 1");
         exit(EXIT_FAILURE);
@@ -57,48 +105,28 @@ int main(void)
     else if (pid1 == 0) {
         // Child1 process
         if (dup2(par_to_ch_pipe_fd[0], 0) == -1) {
-            perror("Dup2:");
-            exit(EXIT_FAILURE);
+            perror("Dup2");
+            _exit(EXIT_FAILURE);
         }
         if (dup2(ch_to_ch_pipe_fd[1], 1) == -1) {
-            perror("Dup2:");
-            exit(EXIT_FAILURE);
+            perror("Dup2");
+            _exit(EXIT_FAILURE);
         }
 
         close(par_to_ch_pipe_fd[0]); close(par_to_ch_pipe_fd[1]);
         close(ch_to_ch_pipe_fd[0]); close(ch_to_ch_pipe_fd[1]);
         close(ch_to_par_pipe_fd[0]); close(ch_to_par_pipe_fd[1]);
 
+        char *lower_name = "lower";
         char *lower_path = "./lower";
-        char *args[] = {lower_path, NULL};
-        if(execv(*imploder_name, args) == -1) perror(EXIT);
+        char *args[] = {lower_name, NULL};
+        execv(lower_path, args);
 
         perror("Execv failed");
         _exit(ERR_EXEC_FAILED);
-    } else {
-        int status;
-        if (waitpid(pid1, &status, 0) == -1) {
-            perror("Waipid failed");
-            return -1;
-        }
-
-        if (WIFEXITED(status)) {
-            int exit_code = WEXITSTATUS(status);
-
-            if (exit_code == ERR_EXEC_FAILED) {
-                printf("Child was unable was unable to execute exec.");
-            } else if (exit_code != 0) {
-                printf("Child started but finished with a error.");
-            } else {
-                printf("Child failed with unexpected error.");
-            }
-        } else if (WIFSIGNALED(status)) {
-            printf("Child process was killed with a signal %d.\n", WTERMSIG(status));
-        }
     }
 
     pid2 = fork();
-    const char imploder_name[9] = "imploder";
     if (pid2 == -1) {
         perror("Fork 2");
         exit(EXIT_FAILURE);
@@ -106,21 +134,22 @@ int main(void)
     else if (pid2 == 0) {
         // Child2 process
         if (dup2(ch_to_ch_pipe_fd[0], 0) == -1) {
-            perror("Dup2:");
-            exit(EXIT_FAILURE);
+            perror("Dup2");
+            _exit(EXIT_FAILURE);
         }
         if (dup2(ch_to_par_pipe_fd[1], 1) == -1) {
-            perror("Dup2:")
-            exit(EXIT_FAILURE);
+            perror("Dup2");
+            _exit(EXIT_FAILURE);
         }
 
         close(par_to_ch_pipe_fd[0]); close(par_to_ch_pipe_fd[1]);
         close(ch_to_ch_pipe_fd[0]); close(ch_to_ch_pipe_fd[1]);
         close(ch_to_par_pipe_fd[0]); close(ch_to_par_pipe_fd[1]);
 
+        char *imploder_name = "imploder";
         char *imploder_path = "./imploder";
-        char *args[] = {imploder_path, NULL};
-        if(execv(*imploder_name, args) == -1) perror(EXIT);
+        char *args[] = {imploder_name, NULL};
+        execv(imploder_path, args);
 
         perror("Execv failed");
         _exit(ERR_EXEC_FAILED);
@@ -132,12 +161,30 @@ int main(void)
     close(ch_to_par_pipe_fd[1]);
 
     // parent process continuation
-    printf("Input desired string: ");
+    fprintf(stdout, "Input desired string: ");
+    fflush(stdout);
     size_t input_length = 0;
     char *input_string = dynamic_input_reading(stdin, &input_length);
     if (!input_string) return 1;
-    write(par_to_ch_pipe_fd[1], &input_string, input_length);
-    close(par_to_ch_pipe_fd[1]); close(ch_to_par_pipe_fd[0]);
+    if(write_to_pipe(par_to_ch_pipe_fd[1], input_string, input_length)) {
+        // What to do then?
+    }
+
+    close(par_to_ch_pipe_fd[1]);
+    size_t block_size = 1024;
+    print_from_pipe(ch_to_par_pipe_fd[0], block_size);
+    close(ch_to_par_pipe_fd[0]);
+
+    char* ch1 = "Child 1 (lower)";
+    char* ch2 = "Child 2 (imploder)";
+    int code1 = wait_for_child_status(pid1, ch1);
+    int code2 = wait_for_child_status(pid2, ch2);
     free(input_string);
-    return 0;
+    if (code1) {
+        return 1;
+    } else if (code2) {
+        return 2;
+    } else {
+        return 0;
+    }
 }
