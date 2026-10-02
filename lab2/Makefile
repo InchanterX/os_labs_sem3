@@ -1,6 +1,6 @@
 CC     = gcc
 CFLAGS = -Wall -Wextra -g
-SRC    = lab2/src
+SRC    = src
 
 TARGETS = parent lower imploder
 
