@@ -5,9 +5,11 @@
 #include <sys/wait.h>
 #include <signal.h>
 #include <errno.h>
+#include <fcntl.h>
 
 #include "writer.h"
 
+#define ERR_STD_FD_CLOSED 125
 #define ERR_SETUP_FAILED 126
 #define ERR_EXEC_FAILED 127
 #define ERR_FLAG_MEM (1 << 0)
@@ -15,6 +17,18 @@
 #define ERR_FLAG_CHILD1 (1 << 2)
 #define ERR_FLAG_CHILD2 (1 << 3)
 #define ERR_FLAG_IO (1 << 4)
+
+
+int check_std_fds(void) {
+    int ok = 1;
+    for (int fd = 0; fd <= 2; fd++) {
+        if (fcntl(fd, F_GETFD) == -1) {
+            fprintf(stderr, "Standard descriptor %d is closed.\n", fd);
+            ok = 0;
+        }
+    }
+    return ok ? 0 : 1;
+}
 
 char *dynamic_input_reading(FILE *std_in_stream, size_t *out_length) {
     if (!std_in_stream || !out_length) return NULL;
@@ -95,8 +109,11 @@ int print_from_pipe(int pipe_fd, size_t block_size) {
 }
 
 
-int main(void)
-{
+int main(void) {
+    if (check_std_fds() != 0) {
+        return ERR_STD_FD_CLOSED;
+    }
+
     // Pipes initialization
     int par_to_ch_pipe_fd[2], ch_to_ch_pipe_fd[2], ch_to_par_pipe_fd[2];
     if (pipe(par_to_ch_pipe_fd) == -1) {
