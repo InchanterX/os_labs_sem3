@@ -9,7 +9,7 @@
 % ======================================================================
 \renewcommand{\reportNumber}{2}
 \renewcommand{\reportDiscipline}{Операционные системы и архитектура компьютера}
-\renewcommand{\reportTheme}{Управление процессами ОС и обмен данных между ними}
+\renewcommand{\reportTheme}{Управление потоками в ОС и обеспечение синхронизации между ними}
 \renewcommand{\reportStudent}{Черноглазкин Е.А.}
 \renewcommand{\reportGroup}{206}
 \renewcommand{\reportTeacher}{Ефимов Д.А.}
@@ -92,16 +92,16 @@ void *worker(void *arg) {
 
 \begin{codeblock}
 ...
-size_t positions_count = input_length - search_length + 1;
+size_t positions_count = text_length - pattern_length + 1;
 if ((size_t)threads_count > positions_count) threads_count = (long long)positions_count;
 ...
 \end{codeblock}
 \lstcaption{Ограничение числа потоков}
 
 
-\subsection{Распределение работы и запуск потоков}
+\subsection{Распределение работы}
 
-Позиции делятся на \texttt{threads\_count} частей, остаток от деления раздаётся по одной позиции первым потокам, так что размеры диапазонов отличаются не больше чем на единицу. Для каждой части заполняется задача и создаётся поток через \texttt{pthread\_create}. Число успешно созданных потоков запоминается в \texttt{created}, чтобы при ошибке создания дождаться хотя бы уже запущенных.
+Позиции делятся на \texttt{threads\_count} частей, остаток от деления раздаётся по одной позиции первым потокам, так что размеры диапазонов отличаются не больше чем на единицу. Для каждой части заполняется задача, после чего задачи передаются в \texttt{run\_threads}, отвечающую за запуск потоков.
 
 \begin{codeblock}
 ...
@@ -112,14 +112,30 @@ size_t position = 0;
 for (long long i = 0; i < threads_count; ++i) {
     size_t size = chunk + ((size_t)i < remainder ? 1 : 0);
 
-    tasks[i].text = input_string;
-    tasks[i].pattern = search_string;
-    tasks[i].pattern_length = search_length;
+    tasks[i].text = text;
+    tasks[i].pattern = pattern;
+    tasks[i].pattern_length = pattern_length;
     tasks[i].from = position;
     tasks[i].to = position + size;
     tasks[i].failed = 0;
     position += size;
+}
 
+double elapsed = 0;
+status_t status = run_threads(tasks, threads_count, &elapsed);
+if (status == STATUS_OK) print_result(tasks, threads_count, elapsed);
+...
+\end{codeblock}
+\lstcaption{Распределение работы между потоками}
+
+
+\subsection{Запуск потоков}
+
+Функция \texttt{run\_threads} создаёт по потоку на каждую задачу через \texttt{pthread\_create}. Число успешно созданных потоков запоминается в \texttt{created}, чтобы при ошибке создания дождаться хотя бы уже запущенных.
+
+\begin{codeblock}
+...
+for (long long i = 0; i < count; ++i) {
     int rc = pthread_create(&threads[i], NULL, worker, &tasks[i]);
     if (rc != 0) {
         fprintf(stderr, "pthread_create failed for thread %lld: %s.\n", i, strerror(rc));
@@ -135,7 +151,7 @@ for (long long i = 0; i < threads_count; ++i) {
 
 \subsection{Ожидание потоков}
 
-Главный поток дожидается завершения всех созданных потоков через \texttt{pthread\_join}. Это единственная точка синхронизации в программе: после неё главный поток может безопасно читать массивы позиций и флаги ошибок потоков. Время работы замеряется через \texttt{clock\_gettime(CLOCK\_MONOTONIC)} от создания первого потока до завершения последнего, то есть без учёта чтения ввода и вывода результата.
+Далее та же функция дожидается завершения всех созданных потоков через \texttt{pthread\_join}. Это единственная точка синхронизации в программе: после неё главный поток может безопасно читать массивы позиций и флаги ошибок потоков. Время работы замеряется через \texttt{clock\_gettime(CLOCK\_MONOTONIC)} от создания первого потока до завершения последнего, то есть без учёта чтения ввода и вывода результата.
 
 \begin{codeblock}
 ...

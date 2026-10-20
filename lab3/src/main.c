@@ -117,6 +117,158 @@ static double elapsed_seconds(const struct timespec *start, const struct timespe
     return (double)(end->tv_sec - start->tv_sec) + (double)(end->tv_nsec - start->tv_nsec) / 1e9;
 }
 
+static status_t read_strings(char **text, size_t *text_length, char **pattern, size_t *pattern_length) {
+    fprintf(stderr, "Input string to search in: ");
+    *text = input_data(stdin, text_length);
+    if (!*text) {
+        perror("Reading input string failed");
+        return STATUS_IO_ERROR;
+    }
+
+    fprintf(stderr, "Input string to search for: ");
+    *pattern = input_data(stdin, pattern_length);
+    if (!*pattern) {
+        perror("Reading search string failed");
+        free(*text);
+        *text = NULL;
+        return STATUS_IO_ERROR;
+    }
+    return STATUS_OK;
+}
+
+static void destroy_tasks(task_t *tasks, long long count) {
+    if (!tasks) return;
+
+    for (long long i = 0; i < count; ++i) {
+        dynamic_destroy(tasks[i].positions);
+    }
+    free(tasks);
+}
+
+static task_t *create_tasks(long long count) {
+    task_t *tasks = calloc((size_t)count, sizeof *tasks);
+    if (!tasks) {
+        fprintf(stderr, "Memory allocation for tasks failed.\n");
+        return NULL;
+    }
+
+    for (long long i = 0; i < count; ++i) {
+        tasks[i].positions = dynamic_create(0);
+        if (!tasks[i].positions) {
+            fprintf(stderr, "Memory allocation for positions failed.\n");
+            destroy_tasks(tasks, i);
+            return NULL;
+        }
+    }
+    return tasks;
+}
+
+static status_t run_threads(task_t *tasks, long long count, double *elapsed) {
+    pthread_t *threads = malloc((size_t)count * sizeof *threads);
+    if (!threads) {
+        fprintf(stderr, "Memory allocation for threads failed.\n");
+        return STATUS_NO_MEMORY;
+    }
+
+    struct timespec t_start, t_end;
+    if (clock_gettime(CLOCK_MONOTONIC, &t_start) == -1) {
+        perror("clock_gettime failed");
+        free(threads);
+        return STATUS_TIME_ERROR;
+    }
+
+    status_t status = STATUS_OK;
+    long long created = 0;
+    for (long long i = 0; i < count; ++i) {
+        int rc = pthread_create(&threads[i], NULL, worker, &tasks[i]);
+        if (rc != 0) {
+            fprintf(stderr, "pthread_create failed for thread %lld: %s.\n", i, strerror(rc));
+            status = STATUS_THREAD_ERROR;
+            break;
+        }
+        ++created;
+    }
+
+    for (long long i = 0; i < created; ++i) {
+        int rc = pthread_join(threads[i], NULL);
+        if (rc != 0) {
+            fprintf(stderr, "pthread_join failed for thread %lld: %s.\n", i, strerror(rc));
+            status = STATUS_THREAD_ERROR;
+            continue;
+        }
+        if (tasks[i].failed) {
+            fprintf(stderr, "Memory allocation for positions failed in thread %lld.\n", i);
+            status = STATUS_NO_MEMORY;
+        }
+    }
+
+    if (clock_gettime(CLOCK_MONOTONIC, &t_end) == -1) {
+        perror("clock_gettime failed");
+        status = STATUS_TIME_ERROR;
+    }
+
+    free(threads);
+    if (status == STATUS_OK) *elapsed = elapsed_seconds(&t_start, &t_end);
+    return status;
+}
+
+static void print_result(const task_t *tasks, long long count, double elapsed) {
+    size_t total = 0;
+    for (long long i = 0; i < count; ++i) {
+        for (size_t j = 0; j < tasks[i].positions->size; ++j) {
+            printf(total == 0 ? "%zu" : " %zu", tasks[i].positions->data[j]);
+            ++total;
+        }
+    }
+    if (total == 0) {
+        printf("No occurrences found.\n");
+    } else {
+        printf("\n");
+    }
+    printf("Occurrences: %zu\n", total);
+    printf("Threads: %lld, time: %.6f s\n", count, elapsed);
+}
+
+static status_t search(const char *text, size_t text_length, const char *pattern, size_t pattern_length, long long threads_count) {
+    if (pattern_length == 0) {
+        fprintf(stderr, "Search string must not be empty.\n");
+        return STATUS_BAD_ARGS;
+    }
+    if (pattern_length > text_length) {
+        printf("No occurrences found.\n");
+        return STATUS_OK;
+    }
+
+    size_t positions_count = text_length - pattern_length + 1;
+    if ((size_t)threads_count > positions_count) threads_count = (long long)positions_count;
+
+    task_t *tasks = create_tasks(threads_count);
+    if (!tasks) return STATUS_NO_MEMORY;
+
+    size_t chunk = positions_count / (size_t)threads_count;
+    size_t remainder = positions_count % (size_t)threads_count;
+    size_t position = 0;
+
+    for (long long i = 0; i < threads_count; ++i) {
+        size_t size = chunk + ((size_t)i < remainder ? 1 : 0);
+
+        tasks[i].text = text;
+        tasks[i].pattern = pattern;
+        tasks[i].pattern_length = pattern_length;
+        tasks[i].from = position;
+        tasks[i].to = position + size;
+        tasks[i].failed = 0;
+        position += size;
+    }
+
+    double elapsed = 0;
+    status_t status = run_threads(tasks, threads_count, &elapsed);
+    if (status == STATUS_OK) print_result(tasks, threads_count, elapsed);
+
+    destroy_tasks(tasks, threads_count);
+    return status;
+}
+
 int main(int argc, char *argv[]) {
     long long threads_count = 0;
     int opt;
@@ -150,141 +302,16 @@ int main(int argc, char *argv[]) {
         return STATUS_BAD_ARGS;
     }
 
-    status_t status = STATUS_OK;
     char *input_string = NULL;
     char *search_string = NULL;
-    pthread_t *threads = NULL;
-    task_t *tasks = NULL;
-    long long created = 0;
-
-    fprintf(stderr, "Input string to search in: ");
     size_t input_length = 0;
-    input_string = input_data(stdin, &input_length);
-    if (!input_string) {
-        perror("Reading input string failed");
-        status = STATUS_IO_ERROR;
-        goto cleanup;
-    }
-
-    fprintf(stderr, "Input string to search for: ");
     size_t search_length = 0;
-    search_string = input_data(stdin, &search_length);
-    if (!search_string) {
-        perror("Reading search string failed");
-        status = STATUS_IO_ERROR;
-        goto cleanup;
-    }
 
-    if (search_length == 0) {
-        fprintf(stderr, "Search string must not be empty.\n");
-        status = STATUS_BAD_ARGS;
-        goto cleanup;
-    }
-    if (search_length > input_length) {
-        printf("No occurrences found.\n");
-        goto cleanup;
-    }
-
-    size_t positions_count = input_length - search_length + 1;
-    if ((size_t)threads_count > positions_count) threads_count = (long long)positions_count;
-
-    threads = malloc((size_t)threads_count * sizeof *threads);
-    if (!threads) {
-        fprintf(stderr, "Memory allocation for threads failed.\n");
-        status = STATUS_NO_MEMORY;
-        goto cleanup;
-    }
-
-    tasks = calloc((size_t)threads_count, sizeof *tasks);
-    if (!tasks) {
-        fprintf(stderr, "Memory allocation for tasks failed.\n");
-        status = STATUS_NO_MEMORY;
-        goto cleanup;
-    }
-
-    for (long long i = 0; i < threads_count; ++i) {
-        tasks[i].positions = dynamic_create(0);
-        if (!tasks[i].positions) {
-            fprintf(stderr, "Memory allocation for positions failed.\n");
-            status = STATUS_NO_MEMORY;
-            goto cleanup;
-        }
-    }
-
-    struct timespec t_start, t_end;
-    if (clock_gettime(CLOCK_MONOTONIC, &t_start) == -1) {
-        perror("clock_gettime failed");
-        status = STATUS_TIME_ERROR;
-        goto cleanup;
-    }
-
-    size_t chunk = positions_count / (size_t)threads_count;
-    size_t remainder = positions_count % (size_t)threads_count;
-    size_t position = 0;
-
-    for (long long i = 0; i < threads_count; ++i) {
-        size_t size = chunk + ((size_t)i < remainder ? 1 : 0);
-
-        tasks[i].text = input_string;
-        tasks[i].pattern = search_string;
-        tasks[i].pattern_length = search_length;
-        tasks[i].from = position;
-        tasks[i].to = position + size;
-        tasks[i].failed = 0;
-        position += size;
-
-        int rc = pthread_create(&threads[i], NULL, worker, &tasks[i]);
-        if (rc != 0) {
-            fprintf(stderr, "pthread_create failed for thread %lld: %s.\n", i, strerror(rc));
-            status = STATUS_THREAD_ERROR;
-            break;
-        }
-        ++created;
-    }
-
-    for (long long i = 0; i < created; ++i) {
-        int rc = pthread_join(threads[i], NULL);
-        if (rc != 0) {
-            fprintf(stderr, "pthread_join failed for thread %lld: %s.\n", i, strerror(rc));
-            status = STATUS_THREAD_ERROR;
-            continue;
-        }
-        if (tasks[i].failed) {
-            fprintf(stderr, "Memory allocation for positions failed in thread %lld.\n", i);
-            status = STATUS_NO_MEMORY;
-        }
-    }
-
-    if (clock_gettime(CLOCK_MONOTONIC, &t_end) == -1) {
-        perror("clock_gettime failed");
-        status = STATUS_TIME_ERROR;
-    }
-
+    status_t status = read_strings(&input_string, &input_length, &search_string, &search_length);
     if (status == STATUS_OK) {
-        size_t total = 0;
-        for (long long i = 0; i < threads_count; ++i) {
-            for (size_t j = 0; j < tasks[i].positions->size; ++j) {
-                printf(total == 0 ? "%zu" : " %zu", tasks[i].positions->data[j]);
-                ++total;
-            }
-        }
-        if (total == 0) {
-            printf("No occurrences found.\n");
-        } else {
-            printf("\n");
-        }
-        printf("Occurrences: %zu\n", total);
-        printf("Threads: %lld, time: %.6f s\n", threads_count, elapsed_seconds(&t_start, &t_end));
+        status = search(input_string, input_length, search_string, search_length, threads_count);
     }
 
-cleanup:
-    if (tasks) {
-        for (long long i = 0; i < threads_count; ++i) {
-            dynamic_destroy(tasks[i].positions);
-        }
-    }
-    free(tasks);
-    free(threads);
     free(search_string);
     free(input_string);
 
