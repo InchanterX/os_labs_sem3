@@ -1,0 +1,143 @@
+\NeedsTeXFormat{LaTeX2e}
+\ProvidesPackage{mai-report}[2026/09/21 v2.0 MAI lab report (required template)]
+
+% ----------------------------------------------------------------------
+%  1. Язык и шрифты
+% ----------------------------------------------------------------------
+\RequirePackage{fontspec}
+\RequirePackage{polyglossia}
+\setmainlanguage{russian}
+\setotherlanguage{english}
+
+\IfFontExistsTF{Times New Roman}
+  {\setmainfont{Times New Roman}}
+  {\setmainfont{Liberation Serif}}
+\IfFontExistsTF{Courier New}
+  {\setmonofont{Courier New}[Scale=0.85]}
+  {\setmonofont{Liberation Mono}[Scale=0.85]}
+
+% ----------------------------------------------------------------------
+%  2. Геометрия страницы (как в шаблоне: 38,1 / 25,4 мм)
+% ----------------------------------------------------------------------
+\RequirePackage{geometry}
+\geometry{a4paper, top=38.1mm, left=38.1mm, right=25.4mm, bottom=25.4mm}
+
+% ----------------------------------------------------------------------
+%  3. Интервалы и абзацы
+% ----------------------------------------------------------------------
+\RequirePackage{setspace}
+\setstretch{1.15}
+\RequirePackage{indentfirst}
+\setlength{\parindent}{1.25cm}
+\setlength{\parskip}{6pt}
+
+\tolerance=2000
+\emergencystretch=2em
+
+% ----------------------------------------------------------------------
+%  4. Заголовки (нумерованные). H1 - 14 pt ж., H2 - 13 pt ж.
+% ----------------------------------------------------------------------
+\RequirePackage{titlesec}
+\setcounter{secnumdepth}{2}
+\titleformat{\section}
+  {\normalfont\fontsize{14}{16.8}\bfseries}{\thesection.}{0.5em}{}
+\titleformat{\subsection}
+  {\normalfont\fontsize{13}{15.6}\bfseries}{\thesubsection}{0.5em}{}
+\titlespacing*{\section}{0pt}{18pt}{9pt}
+\titlespacing*{\subsection}{0pt}{12pt}{6pt}
+
+% ----------------------------------------------------------------------
+%  5. Списки
+% ----------------------------------------------------------------------
+\RequirePackage{enumitem}
+\setlist[itemize,1]{label=\textemdash, leftmargin=1.25cm, itemsep=2pt, topsep=2pt}
+\setlist[enumerate,1]{leftmargin=1.25cm, itemsep=2pt, topsep=2pt}
+
+% ----------------------------------------------------------------------
+%  6. Код / листинги и консольный вывод
+% ----------------------------------------------------------------------
+\RequirePackage{xcolor}
+\RequirePackage{fvextra}
+\definecolor{codeframe}{gray}{0.80}
+\DefineVerbatimEnvironment{codeblock}{Verbatim}{%
+  frame=single, rulecolor=\color{codeframe}, framesep=6pt,
+  fontsize=\footnotesize, breaklines=true, breakanywhere=true}
+\newcommand{\code}[1]{\texttt{#1}}
+
+% ----------------------------------------------------------------------
+%  7. Подписи «Рисунок N - …» и «Листинг N - …»
+% ----------------------------------------------------------------------
+\newcounter{maifig}
+\newcommand{\figcaption}[1]{%
+  \par\addvspace{2pt}%
+  {\centering\itshape\refstepcounter{maifig}Рисунок \themaifig~— #1\par}%
+  \addvspace{6pt}}
+\newcounter{mailst}
+\newcommand{\lstcaption}[1]{%
+  \par\addvspace{2pt}%
+  {\centering\itshape\refstepcounter{mailst}Листинг \themailst~— #1\par}%
+  \addvspace{6pt}}
+
+% ----------------------------------------------------------------------
+%  8. Без оглавления и без номеров страниц
+% ----------------------------------------------------------------------
+\RequirePackage{etoolbox}
+\RequirePackage{hyperref}
+\hypersetup{colorlinks=true, linkcolor=black, urlcolor=blue, pdfstartview=FitH}
+\pagestyle{empty}                     % нет колонтитулов/номеров страниц
+
+% ----------------------------------------------------------------------
+%  9. Поля титульного листа
+% ----------------------------------------------------------------------
+\newcommand{\reportNumber}{\rule[-0.2ex]{3em}{0.4pt}}
+\newcommand{\reportDiscipline}{Операционные системы и архитектура компьютера}
+\newcommand{\reportTheme}{\textit{[Название темы лабораторной работы]}}
+\newcommand{\reportStudent}{Черноглазкин Е.А.}
+\newcommand{\reportGroup}{206}
+\newcommand{\reportTeacher}{Ефимов Д.А.}
+\newcommand{\reportTeacherRole}{Ассистент Центра ТОП-ИТ}
+\newcommand{\reportCity}{Москва}
+\newcommand{\reportYear}{2026}
+
+% ----------------------------------------------------------------------
+% 10. Титульный лист
+% ----------------------------------------------------------------------
+\newcommand{\maketitlepage}{%
+  \begin{titlepage}
+    \centering
+    {\fontsize{10}{12}\selectfont\bfseries
+       МИНИСТЕРСТВО НАУКИ И ВЫСШЕГО ОБРАЗОВАНИЯ РОССИЙСКОЙ ФЕДЕРАЦИИ\par}
+    \vspace{4pt}
+    {\fontsize{10}{12}\selectfont
+       Федеральное государственное автономное образовательное учреждение
+       высшего образования \textbf{«Московский авиационный институт
+       (национальный исследовательский университет)»}\par}
+    \vspace{24pt}
+    {\fontsize{16}{19}\selectfont\bfseries ОТЧЁТ ПО ЛАБОРАТОРНОЙ РАБОТЕ\par}
+    \vspace{4pt}
+    {\fontsize{16}{19}\selectfont\bfseries № \reportNumber\par}
+    \vspace{12pt}
+    {\bfseries Дисциплина:\par}
+    \vspace{2pt}
+    \reportDiscipline\par
+    \vspace{10pt}
+    {\bfseries Тема:\par}
+    \vspace{2pt}
+    \reportTheme\par
+    \vspace{34pt}
+    {\raggedleft
+       \textbf{Выполнил:}\par
+       \vspace{2pt}
+       студент группы \reportGroup\par
+       \reportStudent\par
+       \vspace{10pt}
+       \textbf{Проверил:}\par
+       \vspace{2pt}
+       \textit{\reportTeacherRole}\par
+       \reportTeacher\par}
+    \vfill
+    \reportCity, \reportYear\ г.\par
+  \end{titlepage}%
+}
+
+\endinput
