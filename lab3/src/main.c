@@ -274,7 +274,7 @@ int main(int argc, char *argv[]) {
             printf("\n");
         }
         printf("Occurrences: %zu\n", total);
-        printf("Threads: %lld, time: %.3f s\n", threads_count, elapsed_seconds(&t_start, &t_end));
+        printf("Threads: %lld, time: %.6f s\n", threads_count, elapsed_seconds(&t_start, &t_end));
     }
 
 cleanup:
